@@ -9,8 +9,8 @@ y = np.linspace(0, 20, grid_size)
 X, Y = np.meshgrid(x, y)
 
 # Define gaze direction mean (mu_g) and joystick direction mean (mu_j)
-mu_g = np.array([12, 15])  # gaze vector pointing toward this location
-mu_j = np.array([15, 10])  # joystick vector pointing toward this location
+mu_g = np.array([13, 8])  # gaze vector pointing toward this location
+mu_j = np.array([18, 4])  # joystick vector pointing toward this location
 
 # Define covariance matrices (uncertainty)
 sigma_g = np.array([[6, 0], [0, 6]])   # gaze uncertainty
