@@ -148,21 +148,46 @@ def main():
             running = False
             continue
 
+        # Debug keyboard input
+        if abs(x_axis) > 0.01 or abs(y_axis) > 0.01:
+            print(f"Keyboard input detected: x={x_axis}, y={y_axis}")
+
         if (abs(x_axis) > 0.2 or abs(y_axis) > 0.2) and (current_time - last_action_time > action_cooldown):
+            print(f"Processing keyboard input - cooldown check passed")
             joystick_direction = agent.get_joystick_direction(x_axis, y_axis)
+            print(f"Joystick direction: {joystick_direction}")
+            
             if joystick_direction is not None:
+                print(f"Getting action from agent...")
                 selected_obj_id = agent.get_action(joystick_direction, current_time, objects)
+                print(f"Agent selected object ID: {selected_obj_id}")
+                
                 if selected_obj_id is not None and selected_obj_id < len(objects):
                     selected_object = objects[selected_obj_id]
                     print(f"\nSelected object: {selected_object['name']}")
+                    print(f"Time check: current_time={current_time}, last_action_time={last_action_time}, cooldown={action_cooldown}")
+                    
                     if current_time - last_action_time > action_cooldown:
+                        print(f"Initiating robot movement to {selected_object['name']}...")
                         success = robot.move_to_object(selected_object["handle"])
                         last_action_time = current_time
+                        
                         if success:
+                            print(f"Robot movement successful!")
                             recent_gazes = [g["object_id"] for g in agent.gaze_history[-5:]]
                             reward = 1.0 if selected_obj_id in recent_gazes else -0.2
                             agent.update_q_table(selected_obj_id, joystick_direction, reward)
                             print(f"Updated Q-values with reward: {reward}")
+                        else:
+                            print(f"Robot movement failed!")
+                    else:
+                        print(f"Still in cooldown period")
+                else:
+                    print(f"Invalid object selection: ID={selected_obj_id}, total objects={len(objects)}")
+            else:
+                print(f"No joystick direction determined")
+        elif (abs(x_axis) > 0.2 or abs(y_axis) > 0.2):
+            print(f"Keyboard input detected but still in cooldown: {current_time - last_action_time:.2f}s remaining")
 
     print("Cleaning up resources...")
     keyboard.close()
