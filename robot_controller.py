@@ -10,6 +10,11 @@ class RobotController:
         self.initialized = False
         self.joint_handles = []
         
+        # Movement parameters (from CoppeliaSim script)
+        self.max_vel = [math.pi * 5.5 / 180.0] * 5      # 110/20 deg/s to rad/s
+        self.max_accel = [math.pi * 2 / 180.0] * 5      # 40/20 deg/s² to rad/s²
+        self.max_jerk = [math.pi * 4 / 180.0] * 5       # 80/20 deg/s³ to rad/s³
+        
         # Initialize robot
         self.initialize_robot()
         
@@ -60,14 +65,6 @@ class RobotController:
                 except Exception as e:
                     print(f"Failed to get handle for {joint_name}: {e}")
             
-            # Get target handle
-            try:
-                self.target_handle = self.sim.getObject('/target')
-                print("Got target handle")
-            except:
-                self.target_handle = None
-                print("Could not get target handle")
-            
             # Get base handle
             try:
                 self.base_handle = self.sim.getObject('/my_cobot')
@@ -85,12 +82,12 @@ class RobotController:
         except Exception as e:
             print(f"Error initializing robot: {e}")
 
-    def calculate_joint_positions(self, target_position):
+    def calculate_joint_positions(self, target_position, target_handle=None):
         """Calculate joint positions using the level curve approach"""
-        # Get target position relative to base if needed
-        if self.base_handle is not None:
+        # Get target position relative to base if target_handle is provided
+        if self.base_handle is not None and target_handle is not None:
             try:
-                rel_pos = self.sim.getObjectPosition(self.target_handle, self.base_handle)
+                rel_pos = self.sim.getObjectPosition(target_handle, self.base_handle)
             except:
                 rel_pos = target_position
         else:
@@ -114,21 +111,48 @@ class RobotController:
         
         return target_joint_positions
 
-    def set_joint_positions(self, positions):
-        """Set joint positions directly"""
+    def move_to_config_smooth(self, target_config, duration=2.0):
+        """Smoothly move joints to target configuration over a duration"""
         if not self.initialized:
             return False
         
         try:
-            for i, (handle, position) in enumerate(zip(self.joint_handles, positions)):
-                self.sim.setJointPosition(handle, position)
+            # Get current joint positions
+            current_positions = self.get_joint_positions()
+            if None in current_positions:
+                print("Failed to get current joint positions")
+                return False
+            
+            # Calculate the trajectory
+            steps = int(duration * 50)  # 50 Hz update rate
+            time_step = duration / steps
+            
+            for i in range(steps + 1):
+                t = i / steps  # Progress from 0 to 1
+                
+                # Smooth interpolation using cosine
+                smooth_t = (1 - math.cos(t * math.pi)) / 2
+                
+                # Interpolate joint positions
+                interpolated_positions = []
+                for j in range(len(current_positions)):
+                    pos = current_positions[j] + (target_config[j] - current_positions[j]) * smooth_t
+                    interpolated_positions.append(pos)
+                
+                # Set joint positions
+                for handle, pos in zip(self.joint_handles, interpolated_positions):
+                    self.sim.setJointPosition(handle, pos)
+                
+                time.sleep(time_step)
+            
             return True
+            
         except Exception as e:
-            print(f"Error setting joint positions: {e}")
+            print(f"Error in smooth movement: {e}")
             return False
 
     def move_to_object(self, object_handle):
-        """Move the robot arm to an object using the level curve approach"""
+        """Move the robot arm to an object using smooth motion"""
         if not self.initialized:
             print("Robot not initialized properly")
             return False
@@ -145,20 +169,18 @@ class RobotController:
             else:
                 rel_position = target_position
             
-            # Calculate joint positions using level curve
-            joint_positions = self.calculate_joint_positions(rel_position)
+            # Calculate joint positions using level curve with the object handle
+            joint_positions = self.calculate_joint_positions(rel_position, object_handle)
             print(f"Calculated joint positions: {joint_positions}")
             
-            # Move to the target
-            print("Moving to target position...")
-            success = self.set_joint_positions(joint_positions)
+            # Move smoothly to the target
+            print("Moving smoothly to target position...")
+            success = self.move_to_config_smooth(joint_positions, duration=1.5)
             
             if success:
                 print("Successfully moved to target")
             else:
                 print("Failed to move to target")
-            
-            time.sleep(1.5)
             
             return success
 

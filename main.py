@@ -36,18 +36,42 @@ def gaze_thread():
 
 def get_scene_objects(zmq_connection):
     objects = []
-    response = zmq_connection.get_object_handle('/target')
-    if response.get('returnCode') == 0:
-        target_handle = response.get('handle')
-        position_response = zmq_connection.get_object_position(target_handle, -1)
-        if position_response.get('returnCode') == 0:
-            position = position_response.get('position')
-            objects.append({
-                "id": 0,
-                "handle": target_handle,
-                "name": "target",
-                "position": position
-            })
+    object_id = 0
+    
+    # First, try the base target name
+    potential_targets = []
+    
+    # Then try indexed targets /target[0], /target[1], etc.
+    for i in range(20):  # Arbitrary limit, increase if needed
+        potential_targets.append(f"/target[{i}]")
+    
+    # Now check each potential target
+    for target_name in potential_targets:
+        try:
+            response = zmq_connection.get_object_handle(target_name)
+            if response.get('returnCode') == 0:
+                target_handle = response.get('handle')
+                position_response = zmq_connection.get_object_position(target_handle, -1)
+                if position_response.get('returnCode') == 0:
+                    position = position_response.get('position')
+                    objects.append({
+                        "id": object_id,
+                        "handle": target_handle,
+                        "name": target_name,
+                        "position": position
+                    })
+                    object_id += 1
+                    print(f"Found target: {target_name} at position {position}")
+            else:
+                # If we hit an error with indexed targets, probably no more exist
+                if "[" in target_name and "target[0]" not in target_name:
+                    break
+        except:
+            # If we hit an error with indexed targets, probably no more exist
+            if "[" in target_name and "target[0]" not in target_name:
+                break
+            continue
+    
     return objects
 
 def main():
