@@ -1,4 +1,4 @@
-# Updated zmq_connection.py with proper error handling
+# zmq_connection.py
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 class ZMQConnection:
@@ -42,9 +42,9 @@ class ZMQConnection:
             return -1, None
 
     def set_joint_position(self, joint_handle, position):
-        """Set joint target position"""
+        """Set joint position directly"""
         try:
-            self.sim.setJointTargetPosition(joint_handle, position)
+            self.sim.setJointPosition(joint_handle, position)
             return 0
         except Exception as e:
             print(f"Error setting joint position: {e}")
