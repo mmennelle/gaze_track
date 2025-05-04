@@ -27,8 +27,7 @@ def gaze_thread():
                 with frame_lock:
                     gaze_data = new_gaze_data
                     frame = new_frame
-            # Increased sleep to reduce CPU usage and camera polling
-            time.sleep(0.033)  # ~30 FPS instead of 100 FPS
+            time.sleep(0.033)  # set frame rate. .033 == 33fps
 
     except Exception as e:
         print(f"[Gaze Thread] Exception: {e}")
@@ -38,14 +37,13 @@ def get_scene_objects(zmq_connection):
     objects = []
     object_id = 0
     
-    # First, try the base target name
+    # targets
     potential_targets = []
     
-    # Then try indexed targets /target[0], /target[1], etc.
-    for i in range(20):  # Arbitrary limit, increase if needed
+    #indexed targets /target[0], /target[1].
+    for i in range(20):  # Arbitrary limit
         potential_targets.append(f"/target[{i}]")
     
-    # Now check each potential target
     for target_name in potential_targets:
         try:
             response = zmq_connection.get_object_handle(target_name)
@@ -63,11 +61,10 @@ def get_scene_objects(zmq_connection):
                     object_id += 1
                     print(f"Found target: {target_name} at position {position}")
             else:
-                # If we hit an error with indexed targets, probably no more exist
+              
                 if "[" in target_name and "target[0]" not in target_name:
                     break
         except:
-            # If we hit an error with indexed targets, probably no more exist
             if "[" in target_name and "target[0]" not in target_name:
                 break
             continue
