@@ -1,15 +1,15 @@
-# Optimized main.py for better performance
+# main.py (with integrated gaze calibration pipeline and restored get_scene_objects)
 import time
 import cv2
 import numpy as np
-import sys
 import threading
-
+import sys
 from zmq_connection import ZMQConnection
 from gaze_tracker import get_gaze_data, close as close_gaze_tracker
 from robot_controller import RobotController
 from q_learning_agent import GazeJoystickAgent
 from keyboard_input import KeyboardController
+from gaze_duration_tracker import GazeDurationTracker
 
 # Shared states
 gaze_data = None
@@ -27,8 +27,7 @@ def gaze_thread():
                 with frame_lock:
                     gaze_data = new_gaze_data
                     frame = new_frame
-            time.sleep(0.033)  # set frame rate. .033 == 33fps
-
+            time.sleep(0.033)  # 33 fps
     except Exception as e:
         print(f"[Gaze Thread] Exception: {e}")
         running = False
@@ -36,14 +35,7 @@ def gaze_thread():
 def get_scene_objects(zmq_connection):
     objects = []
     object_id = 0
-    
-    # targets
-    potential_targets = []
-    
-    #indexed targets /target[0], /target[1].
-    for i in range(20):  # Arbitrary limit
-        potential_targets.append(f"/target[{i}]")
-    
+    potential_targets = [f"/target[{i}]" for i in range(20)]
     for target_name in potential_targets:
         try:
             response = zmq_connection.get_object_handle(target_name)
@@ -61,18 +53,16 @@ def get_scene_objects(zmq_connection):
                     object_id += 1
                     print(f"Found target: {target_name} at position {position}")
             else:
-              
                 if "[" in target_name and "target[0]" not in target_name:
                     break
         except:
             if "[" in target_name and "target[0]" not in target_name:
                 break
             continue
-    
     return objects
 
 def main():
-    global running, gaze_data, frame
+    global running
 
     print("Starting Eye Gaze Control System...")
     try:
@@ -91,14 +81,48 @@ def main():
         print("Initializing Q-learning agent...")
         agent = GazeJoystickAgent()
 
+        print("Initializing gaze duration tracker...")
+        gaze_tracker = GazeDurationTracker()
+
     except Exception as e:
         print(f"Initialization error: {e}")
         zmq_connection.disconnect()
         sys.exit("Initialization failed")
 
-    # Start threads
-    gaze_tracking_thread = threading.Thread(target=gaze_thread, daemon=True)
-    gaze_tracking_thread.start()
+    threading.Thread(target=gaze_thread, daemon=True).start()
+    time.sleep(1.0)
+    cv2.namedWindow("Gaze Frame", cv2.WINDOW_NORMAL)
+
+    if input("Run gaze calibration phase? (y/n): ").strip().lower().startswith("y"):
+        print("Starting calibration phase (10 seconds)...")
+        start_time = time.time()
+        while time.time() - start_time < 10:
+            objects = get_scene_objects(zmq_connection)
+            current_time = time.time()
+            if gaze_data:
+                h = gaze_data.get("gaze_ratio_horizontal")
+                v = gaze_data.get("gaze_ratio_vertical")
+                if h is not None and v is not None:
+                    wx = -1.0 + 2.0 * h
+                    wy = -1.0 + 2.0 * v
+                    min_dist = float('inf')
+                    target = None
+                    for obj in objects:
+                        ox, oy, _ = obj["position"]
+                        dist = np.sqrt((wx - ox)**2 + (wy - oy)**2)
+                        if dist < min_dist:
+                            min_dist = dist
+                            target = obj
+                    if target:
+                        print(f"[Calibration] Looking at: {target['name']}")
+                        gaze_tracker.update(target["id"])
+                        agent.update_gaze_history(target["id"], current_time)
+            if frame is not None:
+                cv2.imshow("Gaze Frame", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            time.sleep(0.033)
+        print("Calibration complete. Entering live mode.")
 
     print("System initialized. Starting main loop...")
     selected_obj_id = None
@@ -106,27 +130,23 @@ def main():
     action_cooldown = 1.0
     last_object_check = 0
     object_check_interval = 0.5
-    objects = []  # Initialize objects list
+    objects = []
 
     while running:
-        # Handle GUI display
         with frame_lock:
             current_frame = frame
             current_gaze_data = gaze_data
-        
+
         if current_frame is not None:
-            cv2.imshow("Eye Gaze Control System", current_frame)
-        
+            cv2.imshow("Gaze Frame", current_frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             running = False
             break
 
-        # Check for objects periodically
         current_time = time.time()
         if current_time - last_object_check > object_check_interval:
             objects = get_scene_objects(zmq_connection)
             last_object_check = current_time
-            
             if not objects:
                 print("No objects found in scene")
             else:
@@ -134,7 +154,6 @@ def main():
                 for obj in objects:
                     print(f"  - {obj['name']} at position {obj['position']}")
 
-        # Skip processing if no objects are available
         if not objects:
             x_axis, y_axis, keyboard_running = keyboard.update()
             if not keyboard_running:
@@ -145,54 +164,52 @@ def main():
             gazed_object = None
             h_ratio = current_gaze_data.get("gaze_ratio_horizontal")
             v_ratio = current_gaze_data.get("gaze_ratio_vertical")
-
             if h_ratio is not None and v_ratio is not None:
-                world_x = -1.0 + 2.0 * h_ratio
-                world_y = -1.0 + 2.0 * v_ratio
-
+                wx = -1.0 + 2.0 * h_ratio
+                wy = -1.0 + 2.0 * v_ratio
                 min_distance = float('inf')
                 for obj in objects:
-                    obj_x, obj_y, _ = obj["position"]
-                    distance = np.sqrt((world_x - obj_x)**2 + (world_y - obj_y)**2)
+                    ox, oy, _ = obj["position"]
+                    distance = np.sqrt((wx - ox)**2 + (wy - oy)**2)
                     if distance < min_distance:
                         min_distance = distance
                         gazed_object = obj
                 if min_distance >= 0.5:
                     gazed_object = None
-
             if gazed_object:
-                agent.update_gaze_history(gazed_object["id"], current_time)
                 print(f"Looking at: {gazed_object['name']}")
+                gaze_tracker.update(gazed_object["id"])
+                agent.update_gaze_history(gazed_object["id"], current_time)
 
         x_axis, y_axis, keyboard_running = keyboard.update()
         if not keyboard_running:
             running = False
-            continue
+            break
 
         if (abs(x_axis) > 0.2 or abs(y_axis) > 0.2) and (current_time - last_action_time > action_cooldown):
             joystick_direction = agent.get_joystick_direction(x_axis, y_axis)
-            if joystick_direction is not None:
-                selected_obj_id = agent.get_action(joystick_direction, current_time, objects)
-                if selected_obj_id is not None and selected_obj_id < len(objects):
-                    selected_object = objects[selected_obj_id]
-                    print(f"\nSelected object: {selected_object['name']}")
-                    if current_time - last_action_time > action_cooldown:
-                        success = robot.move_to_object(selected_object["handle"])
-                        last_action_time = current_time
-                        if success:
-                            recent_gazes = [g["object_id"] for g in agent.gaze_history[-5:]]
-                            reward = 1.0 if selected_obj_id in recent_gazes else -0.2
-                            agent.update_q_table(selected_obj_id, joystick_direction, reward)
-                            print(f"Updated Q-values with reward: {reward}")
+            gaze_durations = {obj["id"]: gaze_tracker.get_duration(obj["id"]) for obj in objects}
+            selected_obj_id = agent.get_action(joystick_direction, current_time, objects, gaze_durations)
+
+            if selected_obj_id is not None and 0 <= selected_obj_id < len(objects):
+                target = objects[selected_obj_id]
+                print(f"Selected object: {target['name']}")
+                success = robot.move_to_object(target["handle"])
+                if success:
+                    recent_gazes = [g["object_id"] for g in agent.gaze_history[-5:]]
+                    reward = 1.0 if selected_obj_id in recent_gazes else -0.2
+                    agent.update_q_table(selected_obj_id, joystick_direction, reward)
+                    print(f"Updated Q-values with reward: {reward}")
+                last_action_time = current_time
 
     print("Cleaning up resources...")
     keyboard.close()
     running = False
-    gaze_tracking_thread.join()
     close_gaze_tracker()
     zmq_connection.disconnect()
     cv2.destroyAllWindows()
     print("System shutdown complete")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
+    print("Starting system. It takes 1 minute.")
     main()
