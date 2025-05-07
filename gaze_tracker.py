@@ -1,4 +1,4 @@
-# Improved gaze_tracker.py with filtering and error handling
+# Updated gaze_tracker.py with the enhanced calibration system
 import time
 import cv2
 import numpy as np
@@ -8,46 +8,175 @@ from gaze_tracking import GazeTracking
 
 # Configure logging
 logger = logging.getLogger("GazeTracker")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
-class GazeFilter:
+class ImprovedGazeFilter:
     """
-    Smoothing filter for gaze data to reduce jitter and outliers
+    Enhanced smoothing filter for gaze data with better calibration capabilities
+    that adapts to the user's actual gaze position
     """
-    def __init__(self, window_size=5):
+    def __init__(self, window_size=10):
         self.window_size = window_size
         self.h_buffer = deque(maxlen=window_size)
         self.v_buffer = deque(maxlen=window_size)
         
+        # Calibration data
+        self.calibration_samples = []
+        self.calibration_model = None
+        self.calibrated = False
+        self.min_samples_required = 5
+        
     def update(self, h_ratio, v_ratio):
         """Update the filter with new gaze data"""
-        if h_ratio is not None:
+        if h_ratio is not None and 0 <= h_ratio <= 1:
             self.h_buffer.append(h_ratio)
-        if v_ratio is not None:
+        if v_ratio is not None and 0 <= v_ratio <= 1:
             self.v_buffer.append(v_ratio)
             
     def get_filtered_ratios(self):
         """Return filtered gaze ratios with outlier removal"""
-        if len(self.h_buffer) == 0 or len(self.v_buffer) == 0:
+        if len(self.h_buffer) < 3 or len(self.v_buffer) < 3:
             return None, None
             
         # Convert to numpy arrays for faster processing
         h_values = np.array(list(self.h_buffer))
         v_values = np.array(list(self.v_buffer))
         
-        # Simple outlier removal (values beyond 2 standard deviations)
-        h_mean = np.mean(h_values)
-        h_std = np.std(h_values)
-        h_filtered = h_values[np.abs(h_values - h_mean) < 2 * h_std]
+        # Reject outliers using median absolute deviation (MAD)
+        # More robust than standard deviation
+        h_median = np.median(h_values)
+        v_median = np.median(v_values)
         
-        v_mean = np.mean(v_values)
-        v_std = np.std(v_values)
-        v_filtered = v_values[np.abs(v_values - v_mean) < 2 * v_std]
+        h_mad = np.median(np.abs(h_values - h_median))
+        v_mad = np.median(np.abs(v_values - v_median))
         
-        # If all values were outliers, return the mean
+        # Use MAD to identify outliers (threshold of 3 MADs)
+        h_threshold = 3 * h_mad if h_mad > 0 else 0.1
+        v_threshold = 3 * v_mad if v_mad > 0 else 0.1
+        
+        h_filtered = h_values[np.abs(h_values - h_median) < h_threshold]
+        v_filtered = v_values[np.abs(v_values - v_median) < v_threshold]
+        
+        # If all values were outliers, return the median
         if len(h_filtered) == 0 or len(v_filtered) == 0:
-            return h_mean, v_mean
+            return h_median, v_median
+        
+        # Calculate filtered values
+        h_filtered_value = np.mean(h_filtered)
+        v_filtered_value = np.mean(v_filtered)
+        
+        # Apply calibration if available
+        if self.calibrated and self.calibration_model is not None:
+            h_filtered_value, v_filtered_value = self.apply_calibration(h_filtered_value, v_filtered_value)
             
-        return np.mean(h_filtered), np.mean(v_filtered)
+        return h_filtered_value, v_filtered_value
+    
+    def add_calibration_sample(self, gaze_h, gaze_v, target_h, target_v):
+        """
+        Add a calibration sample mapping gaze coordinates to target coordinates
+        
+        Args:
+            gaze_h, gaze_v: Raw gaze coordinates (0-1)
+            target_h, target_v: Actual target coordinates (0-1)
+        """
+        # Add the gaze-to-target mapping
+        self.calibration_samples.append({
+            "gaze_h": gaze_h,
+            "gaze_v": gaze_v,
+            "target_h": target_h,
+            "target_v": target_v
+        })
+        
+        logger.info(f"Added calibration sample: gaze ({gaze_h:.3f}, {gaze_v:.3f}) -> target ({target_h:.3f}, {target_v:.3f})")
+    
+    def finalize_calibration(self):
+        """Create a calibration model from collected samples"""
+        # Check if we have enough calibration samples
+        if len(self.calibration_samples) < self.min_samples_required:
+            logger.warning(f"Not enough calibration samples: {len(self.calibration_samples)}/{self.min_samples_required}")
+            return False
+            
+        # Extract data arrays
+        gaze_h = np.array([sample["gaze_h"] for sample in self.calibration_samples])
+        gaze_v = np.array([sample["gaze_v"] for sample in self.calibration_samples])
+        target_h = np.array([sample["target_h"] for sample in self.calibration_samples])
+        target_v = np.array([sample["target_v"] for sample in self.calibration_samples])
+        
+        # Create a polynomial calibration model
+        # We'll use a polynomial transformation of degree 2 
+        # This allows us to correct for non-linear distortions in gaze tracking
+        try:
+            # For horizontal calibration (x-axis)
+            h_coeffs = np.polyfit(gaze_h, target_h, 2)
+            
+            # For vertical calibration (y-axis)
+            v_coeffs = np.polyfit(gaze_v, target_v, 2)
+            
+            # Store the model
+            self.calibration_model = {
+                "h_coeffs": h_coeffs,
+                "v_coeffs": v_coeffs
+            }
+            
+            # Mark as calibrated
+            self.calibrated = True
+            
+            logger.info(f"Calibration model created from {len(self.calibration_samples)} samples")
+            logger.info(f"Horizontal coefficients: {h_coeffs}")
+            logger.info(f"Vertical coefficients: {v_coeffs}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error creating calibration model: {e}")
+            return False
+    
+    def apply_calibration(self, h_ratio, v_ratio):
+        """
+        Apply calibration to raw gaze coordinates
+        
+        Args:
+            h_ratio, v_ratio: Raw gaze coordinates (0-1)
+        
+        Returns:
+            Calibrated gaze coordinates (0-1)
+        """
+        if not self.calibrated or self.calibration_model is None:
+            return h_ratio, v_ratio
+        
+        try:
+            # Apply polynomial transformation
+            h_coeffs = self.calibration_model["h_coeffs"]
+            v_coeffs = self.calibration_model["v_coeffs"]
+            
+            # Calculate calibrated coordinates
+            h_calibrated = np.polyval(h_coeffs, h_ratio)
+            v_calibrated = np.polyval(v_coeffs, v_ratio)
+            
+            # Ensure results stay in [0,1] range
+            h_calibrated = np.clip(h_calibrated, 0.0, 1.0)
+            v_calibrated = np.clip(v_calibrated, 0.0, 1.0)
+            
+            return h_calibrated, v_calibrated
+            
+        except Exception as e:
+            logger.error(f"Error applying calibration: {e}")
+            return h_ratio, v_ratio
+    
+    def get_calibration_stats(self):
+        """Return statistics about the calibration"""
+        if not self.calibrated:
+            return {"calibrated": False, "samples": 0}
+        
+        return {
+            "calibrated": True,
+            "samples": len(self.calibration_samples),
+            "model_type": "polynomial-2"
+        }
 
 # Initialize gaze tracking
 logger.info("Initializing webcam and gaze tracking...")
@@ -67,14 +196,18 @@ try:
     webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     webcam.set(cv2.CAP_PROP_FPS, 30)
     
-    # Initialize the gaze filter
-    gaze_filter = GazeFilter(window_size=5)
+    # Initialize the improved gaze filter
+    gaze_filter = ImprovedGazeFilter(window_size=10)
     
     logger.info("Webcam and gaze tracking successfully initialized")
 except Exception as e:
     logger.error(f"Failed to initialize gaze tracking: {e}")
     if webcam and webcam.isOpened():
         webcam.release()
+
+def get_gaze_filter():
+    """Get access to the gaze filter for calibration"""
+    return gaze_filter
 
 def get_gaze_data():
     """
@@ -100,34 +233,64 @@ def get_gaze_data():
         v_ratio = gaze.vertical_ratio()
         
         # Apply filtering if we have valid gaze data
+        calibrated_h_ratio = h_ratio
+        calibrated_v_ratio = v_ratio
+        is_calibrated = False
+        
         if h_ratio is not None and v_ratio is not None:
+            # Update the filter with raw gaze data
             gaze_filter.update(h_ratio, v_ratio)
+            
+            # Get filtered values (may include calibration)
             filtered_h, filtered_v = gaze_filter.get_filtered_ratios()
             
             # Only use filtered values if they're valid
             if filtered_h is not None and filtered_v is not None:
-                h_ratio, v_ratio = filtered_h, filtered_v
+                calibrated_h_ratio, calibrated_v_ratio = filtered_h, filtered_v
+                is_calibrated = gaze_filter.calibrated
 
         # Create frame with annotations
         frame_annotated = gaze.annotated_frame()
         
-        # Add custom visualization for filtered gaze point
-        if h_ratio is not None and v_ratio is not None:
+        # Add custom visualization for eye gaze point
+        if calibrated_h_ratio is not None and calibrated_v_ratio is not None:
             height, width = frame_annotated.shape[:2]
-            x = int(h_ratio * width)
-            y = int(v_ratio * height)
-            cv2.circle(frame_annotated, (x, y), 10, (0, 255, 255), 2)
+            
+            # Draw raw gaze point (yellow)
+            if h_ratio is not None and v_ratio is not None:
+                raw_x = int(h_ratio * width)
+                raw_y = int(v_ratio * height)
+                cv2.circle(frame_annotated, (raw_x, raw_y), 8, (0, 255, 255), 2)
+                cv2.putText(frame_annotated, "Raw", (raw_x + 10, raw_y), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            
+            # Draw calibrated gaze point (green) if different from raw
+            if is_calibrated and (calibrated_h_ratio != h_ratio or calibrated_v_ratio != v_ratio):
+                x = int(calibrated_h_ratio * width)
+                y = int(calibrated_v_ratio * height)
+                cv2.circle(frame_annotated, (x, y), 12, (0, 255, 0), 2)
+                cv2.putText(frame_annotated, "Calibrated", (x + 10, y), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            
+            # Add calibration status
+            status_text = "CALIBRATED" if is_calibrated else "UNCALIBRATED"
+            status_color = (0, 255, 0) if is_calibrated else (0, 100, 255)
+            cv2.putText(frame_annotated, status_text, (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
         
         # Package gaze data
         gaze_data = {
-            "gaze_ratio_horizontal": h_ratio,
-            "gaze_ratio_vertical": v_ratio,
+            "gaze_ratio_horizontal": calibrated_h_ratio,  # Using calibrated values
+            "gaze_ratio_vertical": calibrated_v_ratio,    # Using calibrated values
+            "raw_ratio_horizontal": h_ratio,              # Also store raw values
+            "raw_ratio_vertical": v_ratio,                # Also store raw values
             "looking_left": gaze.is_left(),
             "looking_right": gaze.is_right(),
             "looking_center": gaze.is_center(),
             "pupils_located": gaze.pupils_located,
             "left_pupil": gaze.pupil_left_coords(),
             "right_pupil": gaze.pupil_right_coords(),
+            "calibrated": is_calibrated,
             "timestamp": time.time()
         }
 
