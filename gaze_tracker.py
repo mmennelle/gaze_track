@@ -14,7 +14,7 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-class ImprovedGazeFilter:
+class GazeFilter:
     """
     Enhanced gaze filter that treats user's gaze as ground truth during calibration
     and applies the learned transformation afterward
@@ -193,7 +193,7 @@ try:
     webcam.set(cv2.CAP_PROP_FPS, 30)
     
     # Initialize the improved gaze filter
-    gaze_filter = ImprovedGazeFilter(window_size=10)
+    gaze_filter = GazeFilter(window_size=10)
     
     logger.info("Webcam and gaze tracking successfully initialized")
 except Exception as e:
