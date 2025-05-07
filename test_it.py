@@ -21,6 +21,7 @@ for episode in range(3):
     print(f"\n=== Episode {episode + 1} ===")
 
     # Simulate longer gaze on object 2
+
     for _ in range(15):
         duration_tracker.update(2)
         agent.update_gaze_history(2, time.time())
@@ -33,7 +34,7 @@ for episode in range(3):
         time.sleep(0.05)
 
     # Simulate joystick press (right)
-    x_axis, y_axis = 1.0, 0.0
+    x_axis, y_axis = 0.0, 1.0
     joystick_dir = agent.get_joystick_direction(x_axis, y_axis)
 
     durations = {obj['id']: duration_tracker.get_duration(obj['id']) for obj in objects}
