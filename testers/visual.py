@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 # Grid size (e.g., 20x20)
-grid_size = 20
+grid_size = 200
 x = np.linspace(0, 20, grid_size)
 y = np.linspace(0, 20, grid_size)
 X, Y = np.meshgrid(x, y)

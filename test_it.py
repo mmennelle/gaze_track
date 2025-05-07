@@ -10,14 +10,14 @@ from gaze_duration_tracker import GazeDurationTracker
 PLOT_Q_TABLE = True
 
 # Simulated object list
-objects = [{"id": i, "name": f"target[{i}]", "position": (random.random(), random.random(), 0)} for i in range(5)]
+objects = [{"id": i, "name": f"target[{i}]", "position": (random.random(), random.random(), 0)} for i in range(50)]
 
 # Initialize agent and duration tracker
 agent = GazeJoystickAgent()
 duration_tracker = GazeDurationTracker()
 
 # Simulate multiple interaction rounds
-for episode in range(3):
+for episode in range(20):
     print(f"\n=== Episode {episode + 1} ===")
 
     # Simulate longer gaze on object 2
