@@ -15,7 +15,7 @@ class GazeJoystickAgent:
         self.time_window = 3.0
         self.k = 1.0
         self.last_probabilities = []
-        self.min_gaze_duration = 0.5
+        self.min_gaze_duration = 0.2  # Reduced from 0.5 to allow faster testing
 
     def update_gaze_history(self, object_id, timestamp):
         self.gaze_history.append({"object_id": object_id, "timestamp": timestamp})
@@ -46,6 +46,8 @@ class GazeJoystickAgent:
 
     def get_action(self, joystick_direction, current_time, objects, gaze_durations):
         print(f"[Agent] get_action called with joystick_direction={joystick_direction}, num_objects={len(objects)}")
+        print("Durations:", {k: round(v, 2) for k, v in gaze_durations.items()})  # Log gaze durations
+
         if joystick_direction is None or not objects:
             return None
 
@@ -78,6 +80,8 @@ class GazeJoystickAgent:
             probabilities.append(p)
 
         self.last_probabilities = probabilities
+        print("Probabilities:", [f"{p:.2f}" for p in probabilities])  # Log probabilities
+
         if max(probabilities) == 0:
             return None
 
