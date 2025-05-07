@@ -1,4 +1,4 @@
-# main.py - Final update with enhanced calibration
+# main.py - Final version with truly user-centric calibration
 import time
 import cv2
 import numpy as np
@@ -7,7 +7,7 @@ import sys
 import win32gui
 import win32con
 from zmq_connection import ZMQConnection
-from gaze_tracker import get_gaze_data, close as close_gaze_tracker
+from gaze_tracker import get_gaze_data, get_gaze_filter, close as close_gaze_tracker
 from robot_controller import RobotController
 from q_learning_agent import GazeJoystickAgent
 from keyboard_input import KeyboardController
@@ -57,10 +57,10 @@ def gaze_thread():
         running = False
 
 def run_enhanced_calibration(calibration_module):
-    """Run the enhanced calibration sequence"""
+    """Run the enhanced calibration sequence that uses user's natural gaze as truth"""
     global frame, gaze_data
     
-    print("Starting enhanced calibration...")
+    print("Starting enhanced calibration with user-centric approach...")
     
     # Create calibration window
     cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
@@ -75,7 +75,6 @@ def run_enhanced_calibration(calibration_module):
             frame_size = (480, 640)  # Default size
     
     # Get the gaze filter for calibration
-    from gaze_tracker import get_gaze_filter
     gaze_filter = get_gaze_filter()
     if gaze_filter:
         calibration_module.set_gaze_filter(gaze_filter)
@@ -127,7 +126,7 @@ def run_enhanced_calibration(calibration_module):
             time.sleep(0.03)  # ~30fps
                 
         # Calibration complete or aborted
-        calibration_success = calibration_module.calibration_complete
+        calibration_success = calibration_module.is_calibrated()
         cv2.destroyWindow("Calibration")
         
         return calibration_success
@@ -205,21 +204,22 @@ def main():
     print("Initializing webcam and gaze tracker...")
     time.sleep(2.0)
     
-    # Create window and set it to always be on top
+    # Create main window and set it to always be on top
     cv2.namedWindow("Gaze Frame", cv2.WINDOW_NORMAL)
     set_window_always_on_top("Gaze Frame")
     
     # Create additional window for keyboard controls and make it always on top
     cv2.namedWindow("Keyboard Controls", cv2.WINDOW_NORMAL)
     cv2.moveWindow("Keyboard Controls", 0, 0)  # Position at top-left
-    cv2.resizeWindow("Keyboard Controls", 300, 150)
+    cv2.resizeWindow("Keyboard Controls", 300, 180)
     
     # Create a small help image for keyboard controls
-    help_img = np.zeros((150, 300, 3), dtype=np.uint8)
+    help_img = np.zeros((180, 300, 3), dtype=np.uint8)
     cv2.putText(help_img, "Keyboard Controls:", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     cv2.putText(help_img, "Arrow keys - Move", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     cv2.putText(help_img, "Q - Quit", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     cv2.putText(help_img, "C - Recalibrate", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(help_img, "R - Reset calibration", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     
     # Set the help window to be always on top
     set_window_always_on_top("Keyboard Controls")
@@ -230,6 +230,7 @@ def main():
         calibration_success = run_enhanced_calibration(calibration_module)
         if calibration_success:
             print("Enhanced calibration completed successfully!")
+            print("The system is now calibrated to YOUR gaze patterns.")
         else:
             print("Enhanced calibration did not complete. Using default settings.")
 
@@ -259,6 +260,16 @@ def main():
             # Recalibration option
             print("Starting recalibration...")
             run_enhanced_calibration(calibration_module)
+        elif key == ord('r'):
+            # Reset calibration
+            gaze_filter = get_gaze_filter()
+            if gaze_filter:
+                gaze_filter.calibration_samples = []
+                gaze_filter.calibrated = False
+                gaze_filter.calibration_model = None
+                print("Calibration has been reset to default")
+            else:
+                print("Could not access gaze filter to reset calibration")
 
         current_time = time.time()
         if current_time - last_object_check > object_check_interval:
@@ -277,7 +288,7 @@ def main():
 
         if current_gaze_data and current_gaze_data.get("pupils_located", False):
             gazed_object = None
-            h_ratio = current_gaze_data.get("gaze_ratio_horizontal")
+            h_ratio = current_gaze_data.get("gaze_ratio_horizontal")  # This will be the calibrated value if available
             v_ratio = current_gaze_data.get("gaze_ratio_vertical")
             
             # Get whether the gaze is calibrated
@@ -294,7 +305,7 @@ def main():
                         min_distance = distance
                         gazed_object = obj
                 
-                # If calibrated, we can use a tighter threshold
+                # If calibrated, we can use a tighter threshold since accuracy should be better
                 distance_threshold = 0.3 if is_calibrated else 0.5
                 if min_distance >= distance_threshold:
                     gazed_object = None

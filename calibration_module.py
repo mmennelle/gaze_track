@@ -1,9 +1,8 @@
-# calibration_module.py - Complete rewrite for better eye gaze calibration
+# calibration_module.py - Complete rewrite with user gaze as source of truth
 import time
 import cv2
 import numpy as np
 import logging
-from gaze_tracker import get_gaze_data
 
 # Configure logging
 logger = logging.getLogger("CalibrationModule")
@@ -138,7 +137,10 @@ class CalibrationModule:
         return overlay, (screen_x, screen_y)
     
     def run_calibration(self, frame_size):
-        """Run the calibration sequence with improved logic that adapts to user's actual gaze position"""
+        """
+        Run the calibration sequence with improved logic that fully trusts the user's gaze
+        as the source of truth for where they are looking at targets
+        """
         logger.info("Starting guided calibration sequence...")
         
         # Get all calibration objects and create sequence
@@ -153,22 +155,35 @@ class CalibrationModule:
         
         logger.info(f"Created calibration sequence with {len(self.calibration_sequence)} targets")
         
-        # Show initial instruction screen
+        # Show initial instruction screen with clear instructions
         instruction_overlay = np.zeros((frame_size[0], frame_size[1], 3), dtype=np.uint8)
         cv2.putText(instruction_overlay, "Eye Gaze Calibration", 
-                   (frame_size[1] // 2 - 150, frame_size[0] // 2 - 50), 
+                   (frame_size[1] // 2 - 150, frame_size[0] // 2 - 80), 
                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+        
+        # Make it very clear that the system adapts to the user, not vice versa
+        cv2.putText(instruction_overlay, "This system adapts to YOUR gaze - not the other way around!", 
+                   (frame_size[1] // 2 - 320, frame_size[0] // 2 - 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                   
         cv2.putText(instruction_overlay, "You will be asked to look at several targets", 
-                   (frame_size[1] // 2 - 250, frame_size[0] // 2), 
+                   (frame_size[1] // 2 - 250, frame_size[0] // 2 + 10), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
-        cv2.putText(instruction_overlay, "Focus your gaze on each target until the progress bar completes", 
-                   (frame_size[1] // 2 - 300, frame_size[0] // 2 + 40), 
+        cv2.putText(instruction_overlay, "For each target:", 
+                   (frame_size[1] // 2 - 100, frame_size[0] // 2 + 50), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
-        cv2.putText(instruction_overlay, "The system will adapt to your eye position - not the other way around", 
-                   (frame_size[1] // 2 - 320, frame_size[0] // 2 + 80), 
+        cv2.putText(instruction_overlay, "1. Look directly at the pulsing circle", 
+                   (frame_size[1] // 2 - 220, frame_size[0] // 2 + 80), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
+        cv2.putText(instruction_overlay, "2. Keep looking until the progress bar completes", 
+                   (frame_size[1] // 2 - 260, frame_size[0] // 2 + 110), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
+        cv2.putText(instruction_overlay, "3. The system will calibrate to your natural gaze pattern", 
+                   (frame_size[1] // 2 - 290, frame_size[0] // 2 + 140), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
+        
         cv2.putText(instruction_overlay, "Press any key to begin calibration", 
-                   (frame_size[1] // 2 - 200, frame_size[0] // 2 + 130), 
+                   (frame_size[1] // 2 - 180, frame_size[0] // 2 + 190), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         yield None, instruction_overlay, 0, True  # Signal to wait for key press
@@ -195,15 +210,40 @@ class CalibrationModule:
         for i, target_obj in enumerate(self.calibration_sequence):
             self.current_target_index = i
             
+            # Parameters for collecting samples
             target_calibration_samples = 0
-            required_samples = 30  # Number of gaze samples to collect per target
-            max_duration = 10.0  # Maximum seconds per target before moving on
+            required_samples = 20  # Number of gaze samples to collect per target
+            sample_interval = 0.1  # Time between samples in seconds
+            max_duration = 15.0    # Maximum seconds per target before moving on
             start_time = time.time()
             success_for_target = False
+            last_sample_time = 0
             
             # List to store the collected gaze points for this target
             gaze_samples = []
             
+            # Introduction to target
+            target_intro_overlay = np.zeros((frame_size[0], frame_size[1], 3), dtype=np.uint8)
+            x, y, _ = target_obj["position"]
+            screen_x = int(frame_size[1] * (x + 1) / 2)
+            screen_y = int(frame_size[0] * (y + 1) / 2)
+            
+            # Draw target with animation
+            radius = 30
+            cv2.circle(target_intro_overlay, (screen_x, screen_y), radius, (0, 255, 255), 3)
+            cv2.line(target_intro_overlay, (screen_x - 50, screen_y), (screen_x - 20, screen_y), (0, 255, 255), 2)
+            cv2.line(target_intro_overlay, (screen_x + 20, screen_y), (screen_x + 50, screen_y), (0, 255, 255), 2)
+            cv2.line(target_intro_overlay, (screen_x, screen_y - 50), (screen_x, screen_y - 20), (0, 255, 255), 2)
+            cv2.line(target_intro_overlay, (screen_x, screen_y + 20), (screen_x, screen_y + 50), (0, 255, 255), 2)
+            
+            cv2.putText(target_intro_overlay, f"Target {i+1}: Look at this point", 
+                       (frame_size[1] // 2 - 150, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            
+            yield None, target_intro_overlay, 0, False
+            time.sleep(1.0)  # Show target intro briefly
+            
+            # Main calibration loop for this target
             while target_calibration_samples < required_samples:
                 current_time = time.time()
                 elapsed = current_time - start_time
@@ -224,10 +264,10 @@ class CalibrationModule:
                 if progress > 0:
                     cv2.rectangle(overlay, (start_x, 80), (start_x + filled_width, 100), (0, 255, 0), -1)
                 
-                # Add instructional text
-                instruction_text = f"Look at the highlighted target ({i+1}/{len(self.calibration_sequence)})"
-                cv2.putText(overlay, instruction_text, 
-                           (frame_size[1] // 2 - 200, 130), 
+                # Add instructional text emphasizing that user's gaze is correct
+                cv2.putText(overlay, 
+                           f"Just keep looking at the target naturally ({target_calibration_samples}/{required_samples})", 
+                           (frame_size[1] // 2 - 250, 130), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 
                 # Send current frame with overlay to main thread
@@ -238,32 +278,36 @@ class CalibrationModule:
                     logger.warning(f"Timeout on target {target_obj['name']} after {elapsed:.1f} seconds")
                     break
                 
-                # Get the current gaze data
-                current_gaze = yield_gaze_data()
-                
-                # If we have valid gaze data, collect a sample
-                if current_gaze and current_gaze.get("pupils_located", False):
-                    h_ratio = current_gaze.get("gaze_ratio_horizontal")
-                    v_ratio = current_gaze.get("gaze_ratio_vertical")
+                # Get the current gaze data if enough time has passed since the last sample
+                if current_time - last_sample_time >= sample_interval:
+                    current_gaze = yield_gaze_data()
                     
-                    if h_ratio is not None and v_ratio is not None:
-                        # Convert target position to normalized coordinates (0-1)
-                        target_h = (target_obj["position"][0] + 1.0) / 2.0
-                        target_v = (target_obj["position"][1] + 1.0) / 2.0
+                    # If we have valid gaze data, collect a sample
+                    if current_gaze and current_gaze.get("pupils_located", False):
+                        # Use the RAW gaze data (before any calibration) as this is what we're trying to map
+                        h_ratio = current_gaze.get("raw_ratio_horizontal")
+                        v_ratio = current_gaze.get("raw_ratio_vertical")
                         
-                        # Store the mapping between gaze position and target position
-                        gaze_samples.append((h_ratio, v_ratio, target_h, target_v))
-                        target_calibration_samples += 1
-                        
-                        # This is key - we're accepting the user's current gaze position
-                        # as valid for this target, and storing the mapping
-                        logger.info(f"Calibration sample {target_calibration_samples}/{required_samples} for target {target_obj['name']}")
+                        if h_ratio is not None and v_ratio is not None:
+                            # Convert target position to normalized coordinates (0-1)
+                            target_h = (target_obj["position"][0] + 1.0) / 2.0
+                            target_v = (target_obj["position"][1] + 1.0) / 2.0
+                            
+                            # Record mapping: "This gaze position (h_ratio, v_ratio) corresponds to
+                            # looking at target position (target_h, target_v)"
+                            gaze_samples.append((h_ratio, v_ratio, target_h, target_v))
+                            target_calibration_samples += 1
+                            last_sample_time = current_time
+                            
+                            logger.info(f"Calibration sample {target_calibration_samples}/{required_samples} " +
+                                      f"for target {target_obj['name']}: Gaze ({h_ratio:.3f}, {v_ratio:.3f}) -> " +
+                                      f"Target ({target_h:.3f}, {target_v:.3f})")
                 
                 # Small delay to prevent loop running too fast
-                time.sleep(0.05)
+                time.sleep(0.03)
             
             # Process all collected samples for this target
-            if gaze_samples:
+            if len(gaze_samples) >= required_samples * 0.7:  # At least 70% of required samples
                 # Calculate average gaze position for this target
                 avg_h_ratio = sum(sample[0] for sample in gaze_samples) / len(gaze_samples)
                 avg_v_ratio = sum(sample[1] for sample in gaze_samples) / len(gaze_samples)

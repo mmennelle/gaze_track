@@ -1,4 +1,4 @@
-# Updated gaze_tracker.py with the enhanced calibration system
+# Updated gaze_tracker.py with emphasis on using raw gaze data for calibration
 import time
 import cv2
 import numpy as np
@@ -16,8 +16,8 @@ logger.addHandler(handler)
 
 class ImprovedGazeFilter:
     """
-    Enhanced smoothing filter for gaze data with better calibration capabilities
-    that adapts to the user's actual gaze position
+    Enhanced gaze filter that treats user's gaze as ground truth during calibration
+    and applies the learned transformation afterward
     """
     def __init__(self, window_size=10):
         self.window_size = window_size
@@ -31,7 +31,7 @@ class ImprovedGazeFilter:
         self.min_samples_required = 5
         
     def update(self, h_ratio, v_ratio):
-        """Update the filter with new gaze data"""
+        """Update the filter with new raw gaze data"""
         if h_ratio is not None and 0 <= h_ratio <= 1:
             self.h_buffer.append(h_ratio)
         if v_ratio is not None and 0 <= v_ratio <= 1:
@@ -65,19 +65,15 @@ class ImprovedGazeFilter:
         if len(h_filtered) == 0 or len(v_filtered) == 0:
             return h_median, v_median
         
-        # Calculate filtered values
+        # Calculate filtered values (raw, before calibration)
         h_filtered_value = np.mean(h_filtered)
         v_filtered_value = np.mean(v_filtered)
-        
-        # Apply calibration if available
-        if self.calibrated and self.calibration_model is not None:
-            h_filtered_value, v_filtered_value = self.apply_calibration(h_filtered_value, v_filtered_value)
             
         return h_filtered_value, v_filtered_value
     
     def add_calibration_sample(self, gaze_h, gaze_v, target_h, target_v):
         """
-        Add a calibration sample mapping gaze coordinates to target coordinates
+        Add a calibration sample mapping raw gaze coordinates to target coordinates
         
         Args:
             gaze_h, gaze_v: Raw gaze coordinates (0-1)
@@ -137,7 +133,7 @@ class ImprovedGazeFilter:
     
     def apply_calibration(self, h_ratio, v_ratio):
         """
-        Apply calibration to raw gaze coordinates
+        Apply calibration transformation to raw gaze coordinates
         
         Args:
             h_ratio, v_ratio: Raw gaze coordinates (0-1)
@@ -153,7 +149,7 @@ class ImprovedGazeFilter:
             h_coeffs = self.calibration_model["h_coeffs"]
             v_coeffs = self.calibration_model["v_coeffs"]
             
-            # Calculate calibrated coordinates
+            # Calculate calibrated coordinates using polynomial transformation
             h_calibrated = np.polyval(h_coeffs, h_ratio)
             v_calibrated = np.polyval(v_coeffs, v_ratio)
             
@@ -229,46 +225,60 @@ def get_gaze_data():
         gaze.refresh(frame)
         
         # Get raw gaze data
-        h_ratio = gaze.horizontal_ratio()
-        v_ratio = gaze.vertical_ratio()
+        raw_h_ratio = gaze.horizontal_ratio()
+        raw_v_ratio = gaze.vertical_ratio()
         
         # Apply filtering if we have valid gaze data
-        calibrated_h_ratio = h_ratio
-        calibrated_v_ratio = v_ratio
+        filtered_h_ratio = raw_h_ratio
+        filtered_v_ratio = raw_v_ratio
+        calibrated_h_ratio = raw_h_ratio
+        calibrated_v_ratio = raw_v_ratio
         is_calibrated = False
         
-        if h_ratio is not None and v_ratio is not None:
-            # Update the filter with raw gaze data
-            gaze_filter.update(h_ratio, v_ratio)
-            
-            # Get filtered values (may include calibration)
+        if raw_h_ratio is not None and raw_v_ratio is not None:
+            # First step: Update the filter with raw gaze data and get filtered values
+            gaze_filter.update(raw_h_ratio, raw_v_ratio)
             filtered_h, filtered_v = gaze_filter.get_filtered_ratios()
             
             # Only use filtered values if they're valid
             if filtered_h is not None and filtered_v is not None:
-                calibrated_h_ratio, calibrated_v_ratio = filtered_h, filtered_v
-                is_calibrated = gaze_filter.calibrated
+                filtered_h_ratio = filtered_h
+                filtered_v_ratio = filtered_v
+                
+                # Second step: Apply calibration if available
+                if gaze_filter.calibrated:
+                    calibrated_h, calibrated_v = gaze_filter.apply_calibration(filtered_h, filtered_v)
+                    calibrated_h_ratio = calibrated_h
+                    calibrated_v_ratio = calibrated_v
+                    is_calibrated = True
 
         # Create frame with annotations
         frame_annotated = gaze.annotated_frame()
         
         # Add custom visualization for eye gaze point
-        if calibrated_h_ratio is not None and calibrated_v_ratio is not None:
+        if raw_h_ratio is not None and raw_v_ratio is not None:
             height, width = frame_annotated.shape[:2]
             
-            # Draw raw gaze point (yellow)
-            if h_ratio is not None and v_ratio is not None:
-                raw_x = int(h_ratio * width)
-                raw_y = int(v_ratio * height)
-                cv2.circle(frame_annotated, (raw_x, raw_y), 8, (0, 255, 255), 2)
-                cv2.putText(frame_annotated, "Raw", (raw_x + 10, raw_y), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            # Draw raw gaze point (small yellow) - this is what we use for calibration
+            raw_x = int(raw_h_ratio * width)
+            raw_y = int(raw_v_ratio * height)
+            cv2.circle(frame_annotated, (raw_x, raw_y), 5, (0, 255, 255), 1)
             
-            # Draw calibrated gaze point (green) if different from raw
-            if is_calibrated and (calibrated_h_ratio != h_ratio or calibrated_v_ratio != v_ratio):
+            # Draw filtered gaze point (medium orange)
+            filtered_x = int(filtered_h_ratio * width)
+            filtered_y = int(filtered_v_ratio * height)
+            cv2.circle(frame_annotated, (filtered_x, filtered_y), 8, (0, 165, 255), 1)
+            
+            # Draw calibrated gaze point (large green) if calibration is active
+            if is_calibrated:
                 x = int(calibrated_h_ratio * width)
                 y = int(calibrated_v_ratio * height)
                 cv2.circle(frame_annotated, (x, y), 12, (0, 255, 0), 2)
+                
+                # Line connecting raw and calibrated points to show the transformation
+                cv2.line(frame_annotated, (raw_x, raw_y), (x, y), (0, 200, 200), 1)
+                
+                # Label the calibrated point
                 cv2.putText(frame_annotated, "Calibrated", (x + 10, y), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             
@@ -277,13 +287,27 @@ def get_gaze_data():
             status_color = (0, 255, 0) if is_calibrated else (0, 100, 255)
             cv2.putText(frame_annotated, status_text, (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+            
+            # Add explanation of the circles
+            cv2.putText(frame_annotated, "Yellow: Raw    Orange: Filtered    Green: Calibrated", 
+                       (10, height - 20), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
-        # Package gaze data
+        # Package gaze data for use by other components
         gaze_data = {
-            "gaze_ratio_horizontal": calibrated_h_ratio,  # Using calibrated values
-            "gaze_ratio_vertical": calibrated_v_ratio,    # Using calibrated values
-            "raw_ratio_horizontal": h_ratio,              # Also store raw values
-            "raw_ratio_vertical": v_ratio,                # Also store raw values
+            # Calibrated values (or filtered if not calibrated)
+            "gaze_ratio_horizontal": calibrated_h_ratio,
+            "gaze_ratio_vertical": calibrated_v_ratio,
+            
+            # Raw values - important for calibration
+            "raw_ratio_horizontal": raw_h_ratio,
+            "raw_ratio_vertical": raw_v_ratio,
+            
+            # Filtered values (before calibration)
+            "filtered_ratio_horizontal": filtered_h_ratio,
+            "filtered_ratio_vertical": filtered_v_ratio,
+            
+            # Other gaze tracking data
             "looking_left": gaze.is_left(),
             "looking_right": gaze.is_right(),
             "looking_center": gaze.is_center(),
