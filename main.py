@@ -1,9 +1,11 @@
-# main.py (with integrated gaze calibration pipeline and restored get_scene_objects)
+# main.py 
 import time
 import cv2
 import numpy as np
 import threading
 import sys
+import win32gui
+import win32con
 from zmq_connection import ZMQConnection
 from gaze_tracker import get_gaze_data, close as close_gaze_tracker
 from robot_controller import RobotController
@@ -16,6 +18,27 @@ gaze_data = None
 frame = None
 running = True
 frame_lock = threading.Lock()
+
+def set_window_always_on_top(window_name):
+    """Set an OpenCV window to be always on top"""
+    # Give time for the window to be created
+    time.sleep(0.5)
+    
+    # Find the window by name
+    hwnd = win32gui.FindWindow(None, window_name)
+    if hwnd:
+        # Set the window to be topmost (always on top)
+        win32gui.SetWindowPos(
+            hwnd,                # Handle to the window
+            win32con.HWND_TOPMOST,  # Put it on top of all windows
+            0, 0, 0, 0,          # Don't change position or size
+            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE  # Flags
+        )
+        print(f"Window '{window_name}' set to always on top")
+        return True
+    
+    print(f"Window '{window_name}' not found")
+    return False
 
 def gaze_thread():
     global gaze_data, frame, running
@@ -91,12 +114,29 @@ def main():
 
     threading.Thread(target=gaze_thread, daemon=True).start()
     time.sleep(1.0)
+    
+    # Create window and set it to always be on top
     cv2.namedWindow("Gaze Frame", cv2.WINDOW_NORMAL)
+    set_window_always_on_top("Gaze Frame")
+    
+    # Create additional window for keyboard controls and make it always on top
+    cv2.namedWindow("Keyboard Controls", cv2.WINDOW_NORMAL)
+    cv2.moveWindow("Keyboard Controls", 0, 0)  # Position at top-left
+    cv2.resizeWindow("Keyboard Controls", 300, 150)
+    
+    # Create a small help image for keyboard controls
+    help_img = np.zeros((150, 300, 3), dtype=np.uint8)
+    cv2.putText(help_img, "Keyboard Controls:", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(help_img, "Arrow keys - Move", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(help_img, "Q - Quit", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    
+    # Set the help window to be always on top
+    set_window_always_on_top("Keyboard Controls")
 
     if input("Run gaze calibration phase? (y/n): ").strip().lower().startswith("y"):
-        print("Starting calibration phase (10 seconds)...")
+        print("Starting calibration phase (30 seconds)...")
         start_time = time.time()
-        while time.time() - start_time < 10:
+        while time.time() - start_time < 30:
             objects = get_scene_objects(zmq_connection)
             current_time = time.time()
             if gaze_data:
@@ -117,6 +157,10 @@ def main():
                         print(f"[Calibration] Looking at: {target['name']}")
                         gaze_tracker.update(target["id"])
                         agent.update_gaze_history(target["id"], current_time)
+            
+            # Show the help window during calibration
+            cv2.imshow("Keyboard Controls", help_img)
+            
             if frame is not None:
                 cv2.imshow("Gaze Frame", frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -133,6 +177,9 @@ def main():
     objects = []
 
     while running:
+        # Always display the help window
+        cv2.imshow("Keyboard Controls", help_img)
+        
         with frame_lock:
             current_frame = frame
             current_gaze_data = gaze_data
