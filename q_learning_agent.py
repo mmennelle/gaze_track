@@ -93,90 +93,97 @@ class GazeJoystickAgent:
         
         return duration
     
-    def get_action(self, joystick_direction, current_time, objects):
-        """Determine which object to manipulate based on gaze history and Q-values"""
-        print(f"[Agent] get_action called with joystick_direction={joystick_direction}, num_objects={len(objects)}")
-        
-        if joystick_direction is None or not objects:
-            print(f"[Agent] No action: joystick_direction is None or no objects")
-            return None
-            
-        # Look for recently gazed objects within time window
-        recent_objects = {}
-        gaze_durations = {}
-        
-        for gaze_point in reversed(self.gaze_history):
-            time_diff = current_time - gaze_point["timestamp"]
-            
-            if time_diff <= self.time_window:
-                obj_id = gaze_point["object_id"]
-                if obj_id not in recent_objects or time_diff < recent_objects[obj_id]:
-                    recent_objects[obj_id] = time_diff
-                    gaze_durations[obj_id] = self.get_gaze_duration(obj_id, current_time)
-        
-        print(f"[Agent] Recent objects: {recent_objects}")
-        print(f"[Agent] Gaze durations: {gaze_durations}")
-        
-        # Filter out objects that haven't been gazed at long enough
-        valid_objects = {obj_id: time_diff for obj_id, time_diff in recent_objects.items() 
-                        if gaze_durations.get(obj_id, 0) >= self.min_gaze_duration}
-        
-        if not valid_objects:
-            print(f"[Agent] No objects have been gazed at long enough")
-            return None
-        
-        # Calculate probabilities for each object
-        probabilities = []
-        
-        for obj_id in range(min(len(objects), self.max_objects)):
-            q_value = self.q_table[obj_id, joystick_direction]
-            
-            if obj_id in valid_objects:
-                time_diff = valid_objects[obj_id]
-                duration = gaze_durations[obj_id]
-                
-                # Apply probability model
-                p = self.probability_model(obj_id, joystick_direction, time_diff)
-                
-                # Weight by gaze duration
-                p *= min(duration / 2.0, 1.0)  # Normalize duration effect
-                
-                # Combine with Q-value
-                p = 0.7 * p + 0.3 * q_value
-            else:
-                p = 0  # Zero probability for objects not recently gazed at
-                
-            probabilities.append(p)
-        
-        print(f"[Agent] Probabilities: {probabilities}")
-        
-        # Store for visualization
-        self.last_probabilities = probabilities
-        
-        # Select action
-        if max(probabilities) == 0:
-            print(f"[Agent] All probabilities are zero")
-            return None
-            
-        # Exploration vs exploitation
-        if np.random.random() < self.exploration_rate:
-            # Only explore among valid objects
-            valid_indices = [i for i, p in enumerate(probabilities) if p > 0]
-            if valid_indices:
-                action = np.random.choice(valid_indices)
-                print(f"[Agent] Exploration: randomly selected object {action}")
-                return action
-            else:
-                return None
-        else:
-            action = np.argmax(probabilities)
-            if probabilities[action] > 0:
-                print(f"[Agent] Exploitation: selected object {action} with highest probability")
-                return action
-            else:
-                print(f"[Agent] No valid object to select")
-                return None
+    # Modify q_learning_agent.py
+def get_action(self, joystick_direction, current_time, objects):
+    """Optimized version that caches calculations and uses vectorized operations"""
+    if joystick_direction is None or not objects:
+        return None
     
+    # Use numpy arrays for faster computation
+    obj_ids = np.array([obj["id"] for obj in objects][:self.max_objects])
+    
+    # Calculate time differences and durations vectorized
+    time_diffs = np.ones(len(obj_ids)) * np.inf
+    gaze_durations = np.zeros(len(obj_ids))
+    
+    recent_time = current_time - self.time_window
+    recent_gazes = [g for g in self.gaze_history if g["timestamp"] >= recent_time]
+    
+    # Create a mapping of object_id to gaze points
+    obj_gazes = {}
+    for gaze in recent_gazes:
+        obj_id = gaze["object_id"]
+        if obj_id not in obj_gazes:
+            obj_gazes[obj_id] = []
+        obj_gazes[obj_id].append(gaze["timestamp"])
+    
+    # Calculate time diffs and durations
+    for obj_id, timestamps in obj_gazes.items():
+        if obj_id < len(obj_ids):
+            idx = np.where(obj_ids == obj_id)[0]
+            if len(idx) > 0:
+                time_diffs[idx[0]] = current_time - max(timestamps)
+                
+                # Calculate duration
+                if len(timestamps) > 1:
+                    timestamps.sort()
+                    duration = 0
+                    last_time = timestamps[0]
+                    
+                    for time in timestamps[1:]:
+                        if time - last_time < 0.25:
+                            duration += time - last_time
+                        last_time = time
+                    
+                    gaze_durations[idx[0]] = duration
+    
+    # Find valid objects (gazed long enough)
+    valid_mask = gaze_durations >= self.min_gaze_duration
+    
+    if not np.any(valid_mask):
+        return None
+    
+    # Calculate probabilities using vectorized operations
+    q_values = self.q_table[:len(obj_ids), joystick_direction]
+    
+    # Initialize probabilities
+    probabilities = np.zeros(len(obj_ids))
+    
+    # Calculate only for valid objects
+    valid_indices = np.where(valid_mask)[0]
+    
+    if len(valid_indices) > 0:
+        # Apply probability model
+        exponents = self.k * np.exp(time_diffs[valid_indices] * joystick_direction)
+        probs = 1.0 / (1.0 + np.exp(exponents))
+        
+        # Weight by duration
+        duration_weights = np.minimum(gaze_durations[valid_indices] / 2.0, 1.0)
+        probs *= duration_weights
+        
+        # Combine with Q-values
+        probs = 0.7 * probs + 0.3 * q_values[valid_indices]
+        
+        # Assign back to full array
+        probabilities[valid_indices] = probs
+    
+    # Store for visualization
+    self.last_probabilities = probabilities.tolist()
+    
+    if np.max(probabilities) == 0:
+        return None
+    
+    # Exploration vs exploitation
+    if np.random.random() < self.exploration_rate:
+        valid_indices = np.where(probabilities > 0)[0]
+        if len(valid_indices) > 0:
+            return np.random.choice(valid_indices)
+        return None
+    else:
+        action = np.argmax(probabilities)
+        if probabilities[action] > 0:
+            return action
+        return None
     def update_q_table(self, obj_id, joystick_direction, reward):
         """Update Q-value for the selected object and action"""
         if obj_id < self.q_table.shape[0]:
