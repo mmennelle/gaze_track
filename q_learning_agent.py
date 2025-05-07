@@ -87,7 +87,7 @@ class GazeJoystickAgent:
         last_time = gaze_times[0]
         
         for time in gaze_times[1:]:
-            if time - last_time < 0.25:  # Consider continuous if less than 0.25s gap
+            if time - last_time < 0.15:  # Consider continuous if less than 0.25s gap
                 duration += time - last_time
             last_time = time
         
