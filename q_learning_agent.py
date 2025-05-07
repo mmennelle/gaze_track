@@ -1,4 +1,3 @@
-# q_learning_agent.py (Updated to accept external gaze durations)
 import numpy as np
 import time
 
