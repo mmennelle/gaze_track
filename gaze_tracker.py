@@ -182,7 +182,7 @@ gaze_filter = None
 
 try:
     gaze = GazeTracking()
-    webcam = cv2.VideoCapture(0)
+    webcam = cv2.VideoCapture(1, cv2.CAP_DSHOW) #UPDATE THIS TO THE CAMERA INDICIE
     
     if not webcam.isOpened():
         raise Exception("Webcam could not be opened")
