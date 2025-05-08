@@ -4,11 +4,8 @@ import time
 class KeyboardController:
     def __init__(self):
         pygame.init()
-        # Create a small window to capture keyboard events
         self.screen = pygame.display.set_mode((100, 100))
         pygame.display.set_caption("Keyboard Control")
-        
-        # Initialize key states
         self.keys = {
             pygame.K_UP: False,
             pygame.K_DOWN: False,

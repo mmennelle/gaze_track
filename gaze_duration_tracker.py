@@ -1,4 +1,3 @@
-# gaze_duration_tracker.py
 import time
 
 class GazeDurationTracker:

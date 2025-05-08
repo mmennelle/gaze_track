@@ -6,34 +6,32 @@ import matplotlib.pyplot as plt
 from q_learning_agent import GazeJoystickAgent
 from gaze_duration_tracker import GazeDurationTracker
 
-# === CONFIG ===
 PLOT_Q_TABLE = True
 
-# Simulated object list
+
 objects = [{"id": i, "name": f"target[{i}]", "position": (random.random(), random.random(), 0)} for i in range(50)]
 
-# Initialize agent and duration tracker
 agent = GazeJoystickAgent()
 duration_tracker = GazeDurationTracker()
 
-# Simulate multiple interaction rounds
+# ep range
 for episode in range(20):
     print(f"\n=== Episode {episode + 1} ===")
 
-    # Simulate longer gaze on object 2
-
+   
+# object 2
     for _ in range(15):
         duration_tracker.update(2)
         agent.update_gaze_history(2, time.time())
         time.sleep(0.05)
 
-    # Brief gaze on object 3
+    # object 3
     for _ in range(4):
         duration_tracker.update(3)
         agent.update_gaze_history(3, time.time())
         time.sleep(0.05)
 
-    # Simulate joystick press (right)
+    # joystick press right... i think
     x_axis, y_axis = 0.0, 1.0
     joystick_dir = agent.get_joystick_direction(x_axis, y_axis)
 
@@ -45,7 +43,7 @@ for episode in range(20):
         old_q = agent.q_table[chosen_id, joystick_dir]
         print(f"Q-value before update: {old_q:.3f}")
 
-        # Reward based on recent gaze
+      
         recent_gazes = [g["object_id"] for g in agent.gaze_history[-5:]]
         reward = 1.0 if chosen_id in recent_gazes else -0.2
 
@@ -58,7 +56,6 @@ for episode in range(20):
     duration_tracker.reset_all()
     time.sleep(1)
 
-# === Optional Q-table Plot ===
 if PLOT_Q_TABLE:
     plt.imshow(agent.q_table, cmap='viridis', interpolation='nearest')
     plt.colorbar(label='Q-value')

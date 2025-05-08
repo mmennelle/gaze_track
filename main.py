@@ -1,4 +1,4 @@
-# main.py - Final version with truly user-centric calibration
+
 import time
 import cv2
 import numpy as np
@@ -15,7 +15,7 @@ from gaze_duration_tracker import GazeDurationTracker
 from calibration_module import CalibrationModule  
 
 
-# Shared states
+
 gaze_data = None
 frame = None
 running = True
@@ -23,18 +23,17 @@ frame_lock = threading.Lock()
 
 def set_window_always_on_top(window_name):
     """Set an OpenCV window to be always on top"""
-    # Give time for the window to be created
     time.sleep(0.5)
     
-    # Find the window by name
+
     hwnd = win32gui.FindWindow(None, window_name)
     if hwnd:
-        # Set the window to be topmost (always on top)
+
         win32gui.SetWindowPos(
-            hwnd,                # Handle to the window
-            win32con.HWND_TOPMOST,  # Put it on top of all windows
-            0, 0, 0, 0,          # Don't change position or size
-            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE  # Flags
+            hwnd,                
+            win32con.HWND_TOPMOST, 
+            0, 0, 0, 0,          
+            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE  
         )
         print(f"Window '{window_name}' set to always on top")
         return True

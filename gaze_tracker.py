@@ -1,4 +1,4 @@
-# Updated gaze_tracker.py with emphasis on using raw gaze data for calibration
+
 import time
 import cv2
 import numpy as np
@@ -6,7 +6,7 @@ from collections import deque
 import logging
 from gaze_tracking import GazeTracking
 
-# Configure logging
+
 logger = logging.getLogger("GazeTracker")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
@@ -16,7 +16,7 @@ logger.addHandler(handler)
 
 class GazeFilter:
     """
-    Enhanced gaze filter that treats user's gaze as ground truth during calibration
+     gaze filter that treats user's gaze as ground truth during calibration
     and applies the learned transformation afterward
     """
     def __init__(self, window_size=10):
@@ -182,7 +182,7 @@ gaze_filter = None
 
 try:
     gaze = GazeTracking()
-    webcam = cv2.VideoCapture(1, cv2.CAP_DSHOW) #UPDATE THIS TO THE CAMERA INDICIE
+    webcam = cv2.VideoCapture(0, cv2.CAP_DSHOW) #UPDATE THIS TO THE CAMERA INDICIE
     
     if not webcam.isOpened():
         raise Exception("Webcam could not be opened")

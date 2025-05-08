@@ -1,4 +1,3 @@
-# zmq_connection.py
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 class ZMQConnection:

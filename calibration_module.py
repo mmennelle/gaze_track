@@ -1,10 +1,9 @@
-# calibration_module.py - Complete rewrite with user gaze as source of truth
 import time
 import cv2
 import numpy as np
 import logging
 
-# Configure logging
+# logging
 logger = logging.getLogger("CalibrationModule")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
